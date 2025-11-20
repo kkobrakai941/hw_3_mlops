@@ -1,0 +1,65 @@
+version: "3.9"
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    depends_on: [zookeeper]
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    depends_on: [kafka]
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./clickhouse/ddl:/ddl
+
+  clickhouse-init:
+    image: clickhouse/clickhouse-server:24.8
+    depends_on: [clickhouse]
+    volumes:
+      - ./clickhouse/ddl:/ddl
+    entrypoint: >
+      sh -c "
+      echo 'Waiting ClickHouse...' &&
+      for i in 1 2 3 4 5 6 7 8 9 10; do
+        clickhouse-client --host clickhouse --query 'SELECT 1' && break || sleep 2;
+      done &&
+      echo 'Applying DDL...' &&
+      clickhouse-client --host clickhouse --multiquery < /ddl/01_kafka_table.sql &&
+      clickhouse-client --host clickhouse --multiquery < /ddl/02_raw_table_mv.sql &&
+      clickhouse-client --host clickhouse --multiquery < /ddl/03_optimized_table.sql &&
+      echo 'DDL applied.'
+      "
+    restart: "no"
+
+  producer:
+    build:
+      context: .
+      dockerfile: producer.Dockerfile
+    depends_on: [kafka, clickhouse-init]
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    restart: "no"
+
+volumes:
+  clickhouse_data:
