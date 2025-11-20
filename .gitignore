@@ -1,0 +1,17 @@
+# data
+data/*.csv
+data/*.parquet
+data/*.json
+data/*.jsonl
+
+# results
+results/*.csv
+
+# python
+__pycache__/
+*.pyc
+.venv/
+.env
+
+# os
+.DS_Store
